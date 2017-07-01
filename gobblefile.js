@@ -1,5 +1,6 @@
 /*eslint-env node */
 /*eslint object-shorthand: 0 quote-props: 0 */
+
 const fs = require('fs');
 const path = require('path');
 
@@ -10,6 +11,7 @@ const rollupLib = require('rollup');
 const istanbul = require('rollup-plugin-istanbul');
 const MagicString = require('magic-string');
 
+// Build variables
 const time = new Date();
 const commitHash = process.env.COMMIT_HASH || 'unknown';
 const version = require('./package.json').version;
@@ -21,9 +23,10 @@ const banner = `/*
 	License: MIT
 */`;
 
-const runtimeModulesToIgnore = ['parse/_parse.js'].map(p => p.split('/').join(path.sep));
+// Replacements
 const placeholders = { BUILD_PLACEHOLDER_VERSION: version };
 
+// Gobble nodes
 const src = gobble('src');
 const polyfills = src.include(['polyfills.js']);
 const tests = gobble('tests').transform(transpile, { accept: ['.js'] });
@@ -40,34 +43,33 @@ const sandbox = gobble('sandbox');
 
 module.exports = ({
 	'dev:browser'() {
-		const lib = buildUmdLib('ractive.js', []);
+		const lib = buildUmdLib('ractive.js');
 		const tests = buildBrowserTests();
-		const polyfills = buildUmdPolyfill();
-		return gobble([lib, polyfills, tests, sandbox, qunit]);
+		return gobble([lib, tests, sandbox, qunit]);
 	},
 	'bundle:test'() {
-		const lib = buildUmdLib('ractive.js', [], [istanbul()]);
+		const lib = buildUmdLib('ractive.js', [skipModule(['polyfills.js']), istanbul()]);
 		const browserTests = buildBrowserTests();
 		const nodeTests = buildNodeTests();
 		const polyfills = buildUmdPolyfill();
 		return gobble([lib, polyfills, qunit, browserTests, nodeTests]);
 	},
 	'bundle:release'() {
-		const libEsFull = buildESLib('ractive.mjs', []);
-		const libEsRuntime = buildESLib('runtime.mjs', runtimeModulesToIgnore);
+		const esRegular = buildESLib('ractive.mjs', [skipModule(['polyfills.js'])]);
+		const esLegacy = buildESLib('legacy.mjs');
+		const esRuntime = buildESLib('runtime.mjs',  [skipModule(['parse/_parse.js', 'polyfills.js'])]);
+		const esPolyfill = buildESPolyfill();
 
-		const libUmdFull = buildUmdLib('ractive.js', []);
-		const libUmdRuntime = buildUmdLib('runtime.js', runtimeModulesToIgnore);
+		const umdRegular = buildUmdLib('ractive.js', [skipModule(['polyfills.js'])]);
+		const umdLegacy = buildUmdLib('legacy.js');
+		const umdRuntime = buildUmdLib('runtime.js', [skipModule(['parse/_parse.js', 'polyfills.js'])]);
+		const umdPolyfill = buildUmdPolyfill();
 
-		const libEs = gobble([libEsFull, libEsRuntime]);
-		const libUmd = gobble([libUmdFull, libUmdRuntime]);
+		const libEs = gobble([esRegular, esLegacy, esRuntime, esPolyfill]);
+		const libUmd = gobble([umdRegular, umdLegacy, umdRuntime, umdPolyfill]);
 		const libUmdMin = libUmd.transform('uglifyjs', { ext: '.min.js', preamble: banner });
 
-		const polyfillEs = buildESPolyfill();
-		const polyfillUmd = buildUmdPolyfill();
-		const polyfillUmdMin = polyfillUmd.transform('uglifyjs', { ext: '.min.js' });
-
-		return gobble([libEs, libUmd, libUmdMin, polyfillEs, polyfillUmd, polyfillUmdMin, bin, lib, typings, manifest]);
+		return gobble([libEs, libUmd, libUmdMin, bin, lib, typings, manifest]);
 	}
 })[gobble.env()]();
 
@@ -76,9 +78,9 @@ module.exports = ({
 /* Bundle builders */
 
 // Builds a UMD bundle of Ractive
-function buildUmdLib(dest, excludedModules, extraRollupPlugins) {
+function buildUmdLib(dest, plugins = []) {
 	return src.transform(rollup, {
-		plugins: [skipModule(excludedModules)].concat(extraRollupPlugins || []),
+		plugins: plugins,
 		moduleName: 'Ractive',
 		format: 'umd',
 		entry: 'Ractive.js',
@@ -91,9 +93,9 @@ function buildUmdLib(dest, excludedModules, extraRollupPlugins) {
 }
 
 // Builds an ES bundle of Ractive
-function buildESLib(dest, excludedModules) {
+function buildESLib(dest, plugins = []) {
 	return src.transform(rollup, {
-		plugins: [skipModule(excludedModules)],
+		plugins: plugins,
 		format: 'es',
 		entry: 'Ractive.js',
 		dest: dest,
@@ -169,9 +171,7 @@ function skipModule(excludedModules) {
 	return {
 		name: 'skipModule',
 		transform: function (src, modulePath) {
-			// Gobble has a predictable directory structure of gobble/transform/number
-			// so we slice at 3 to slice relative to project root.
-			const moduleRelativePath = path.relative(__dirname, modulePath).split(path.sep).slice(3).join(path.sep);
+			const moduleRelativePath = path.relative(path.join(__dirname, 'src'), modulePath).split(path.sep).join('/');
 			const isModuleExcluded = excludedModules.indexOf(moduleRelativePath) > -1;
 
 			const source = new MagicString(src);

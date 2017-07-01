@@ -1,3 +1,4 @@
+import './polyfills';
 import defaults from './Ractive/config/defaults';
 import easing from './Ractive/static/easing';
 import interpolators from './Ractive/static/interpolators';
